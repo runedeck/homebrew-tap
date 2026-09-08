@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -76,6 +77,12 @@ class SourceWiringTests(unittest.TestCase):
         self.assertIn(
             "python3 -m unittest discover -s tests -p 'test_author*.py'", workflow
         )
+
+    def test_quality_declares_both_event_targets(self):
+        workflow = (ROOT / ".github/workflows/quality.yaml").read_text()
+        step = workflow.split("- name: Pre-push-stage checks", 1)[1]
+        self.assertIn("PR_HEAD: ${{ github.event.pull_request.head.sha }}", step)
+        self.assertIn("PUSH_HEAD: ${{ github.sha }}", step)
 
 
 class AuthorshipIntegrationTests(unittest.TestCase):
@@ -189,6 +196,79 @@ class AuthorshipIntegrationTests(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0, output)
                 if contains is not None:
                     self.assertIn(contains, output)
+
+    def quality_push_check(self, head, *, pr_head="", pr_base=""):
+        workflow = (ROOT / ".github/workflows/quality.yaml").read_text()
+        step = workflow.split("- name: Pre-push-stage checks", 1)[1]
+        script = textwrap.dedent(step.split("run: |\n", 1)[1])
+        values = {
+            "github.event.pull_request.base.sha": pr_base,
+            "github.event.pull_request.head.sha": pr_head,
+            "github.event.before": self.base,
+            "github.sha": head,
+        }
+        for expression, value in values.items():
+            script = script.replace("${{ " + expression + " }}", value)
+        binaries = self.directory / "bin"
+        binaries.mkdir(exist_ok=True)
+        prek = binaries / "prek"
+        checker = str(ROOT / "scripts/check-authorship")
+        prek.write_text(
+            f"#!{sys.executable}\n"
+            "import os, sys\n"
+            "arguments = sys.argv[1:]\n"
+            "references = []\n"
+            "for flag in ('--from-ref', '--to-ref'):\n"
+            "    if flag in arguments:\n"
+            "        references.extend((flag, arguments[arguments.index(flag) + 1]))\n"
+            f"os.execvp('bash', ['bash', {checker!r}, *references])\n",
+            encoding="utf-8",
+        )
+        prek.chmod(0o755)
+        return self.run_command(
+            ["bash", "-e", "-c", script],
+            environment={
+                "PATH": str(binaries) + os.pathsep + self.environment["PATH"],
+                "PR_BASE": pr_base,
+                "PR_HEAD": pr_head,
+                "PUSH_BASE": self.base,
+                "PUSH_HEAD": head,
+            },
+        )
+
+    def test_quality_checks_pr_head_without_synthetic_merge_author(self):
+        head = self.new_head(model_identity())
+        advanced_base = self.commit(OWNER, "Base advance", parents=(self.base,))
+        synthetic = self.commit(
+            "Unlisted Creator <creator@example.invalid>",
+            "Synthetic merge",
+            parents=(advanced_base, head),
+        )
+        result = self.quality_push_check(synthetic, pr_head=head, pr_base=advanced_base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_quality_still_rejects_an_invalid_actual_pr_author(self):
+        head = self.new_head("Unlisted Author <author@example.invalid>")
+        synthetic = self.commit(OWNER, "Synthetic merge", parents=(self.base, head))
+        result = self.quality_push_check(synthetic, pr_head=head, pr_base=self.base)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(head, result.stdout + result.stderr)
+
+    def test_quality_all_files_fallback_checks_the_actual_pr_head(self):
+        head = self.new_head(model_identity())
+        synthetic = self.commit(
+            "Unlisted Creator <creator@example.invalid>",
+            "Synthetic merge",
+            parents=(self.base, head),
+        )
+        result = self.quality_push_check(synthetic, pr_head=head, pr_base="f" * 40)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_quality_push_event_checks_its_own_target(self):
+        head = self.new_head("Unlisted Author <author@example.invalid>")
+        result = self.quality_push_check(head)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(head, result.stdout + result.stderr)
 
     def test_future_matching_models_pass_without_catalog_entries(self):
         for model, harness in (

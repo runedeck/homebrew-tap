@@ -77,6 +77,9 @@ jobs:
                   tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
                   sudo install gitleaks /usr/local/bin/gitleaks
 
+            - name: Authorship regression tests
+              run: python3 -m unittest discover -s tests -p 'test_author*.py'
+
             - name: Commit-stage checks
               uses: j178/prek-action@5337cb91e0fa35a7ff31b9ca345126d8bbbcdf16 # v2
 

@@ -1,6 +1,6 @@
-# Identities allowed to author commits and Co-Authored-By trailers.
-# Model identities carry the model id in parentheses and a non-routable
-# per-model address; the ci/authorship check matches entries exactly.
+# Commit attribution policy. Human identities and vendor aliases stay explicit.
+# Model identities use matching IDs and an approved harness domain.
+# See docs/specs/commit-attribution/spec.md for the contract.
 authors:
     - Martin Zeman <N4M3Z@users.noreply.github.com>
     - Claude (claude) <claude@claude.noreply.nexus.local>
@@ -12,3 +12,8 @@ authors:
     - Claude Gpt 5.6 Sol (gpt-5.6-sol) <gpt-5.6-sol@claude.noreply.nexus.local>
     - Codex Gpt 5.6 Sol (gpt-5.6-sol) <gpt-5.6-sol@codex.noreply.nexus.local>
     - Grok (grok-composer-2.5-fast) <grok-composer-2.5-fast@grok.noreply.nexus.local>
+
+model_domains:
+    - claude.noreply.nexus.local
+    - codex.noreply.nexus.local
+    - grok.noreply.nexus.local

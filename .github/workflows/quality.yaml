@@ -77,13 +77,20 @@ jobs:
                   tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
                   sudo install gitleaks /usr/local/bin/gitleaks
 
+            - name: Authorship regression tests
+              run: python3 -m unittest discover -s tests -p 'test_author*.py'
+
             - name: Commit-stage checks
               uses: j178/prek-action@5337cb91e0fa35a7ff31b9ca345126d8bbbcdf16 # v2
 
             # Scan exactly the commits this event introduces. Without a usable
             # base, gitleaks scans the target history and other hooks inspect all files.
             - name: Pre-push-stage checks
+              env:
+                  PR_HEAD: ${{ github.event.pull_request.head.sha }}
+                  PUSH_HEAD: ${{ github.sha }}
               run: |
+                  to="${PR_HEAD:-$PUSH_HEAD}"
                   if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
                       from="${{ github.event.pull_request.base.sha }}"
                   elif [ -n "${{ github.event.before }}" ] && ! printf '%s' "${{ github.event.before }}" | grep -q '^0*$'; then
@@ -92,7 +99,7 @@ jobs:
                       from=""
                   fi
                   if [ -n "$from" ] && git cat-file -e "$from" 2>/dev/null; then
-                      prek run --stage pre-push --from-ref "$from" --to-ref "${{ github.sha }}"
+                      prek run --stage pre-push --from-ref "$from" --to-ref "$to"
                   else
-                      GITLEAKS_PUSH_TO_REF="${{ github.sha }}" prek run --stage pre-push --all-files
+                      GITLEAKS_PUSH_TO_REF="$to" prek run --stage pre-push --all-files
                   fi

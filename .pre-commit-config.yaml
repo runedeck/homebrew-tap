@@ -88,7 +88,7 @@ repos:
 
           - id: semgrep
             name: semgrep OWASP
-            entry: semgrep scan --config=p/owasp-top-ten --metrics=off --quiet .
+            entry: semgrep scan --config=p/owasp-top-ten --metrics=off --disable-version-check --quiet .
             language: system
             pass_filenames: false
             stages: [pre-push]
@@ -98,4 +98,12 @@ repos:
             entry: sh -c 'if [ -n "${PRE_COMMIT_FROM_REF:-}" ]; then gitleaks git --no-banner --log-opts "${PRE_COMMIT_FROM_REF}..${PRE_COMMIT_TO_REF:-HEAD}"; elif [ -n "${GITLEAKS_PUSH_TO_REF:-}" ]; then gitleaks git --no-banner --log-opts "$GITLEAKS_PUSH_TO_REF"; else bash .githooks/pre-commit --scan-only; fi'
             language: system
             pass_filenames: false
+            stages: [pre-push]
+
+          - id: check-authorship
+            name: authorship (push range)
+            entry: bash scripts/check-authorship
+            language: system
+            pass_filenames: false
+            always_run: true
             stages: [pre-push]

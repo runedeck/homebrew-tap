@@ -1,8 +1,8 @@
 class Rune < Formula
   desc "Deck toolkit for AI harnesses: your runes, deployed"
   homepage "https://github.com/runedeck/cli"
-  url "https://github.com/runedeck/cli/archive/refs/tags/v0.5.0.tar.gz"
-  sha256 "0518ac2e12298571f2abe8c188ca79069f27ffa3b21f4eea6bf4463841cd2459"
+  url "https://github.com/runedeck/cli/archive/refs/tags/v0.7.0.tar.gz"
+  sha256 "33a8e2910c849184178c67cafdf014af56931ee92ec557a9bd3ee27b978d0bbc"
   license "EUPL-1.2"
   head "https://github.com/runedeck/cli.git", branch: "main"
 

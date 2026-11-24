@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# Write Formula/rune.rb for one published release of runedeck/cli.
+#
+# A release carries a prebuilt rune for Apple Silicon macOS and for x86-64
+# Linux, and records their digests in SHA256SUMS. The formula installs that
+# binary on those two platforms and builds the tagged source on every other
+# one. This script reads the three digests from the release and rewrites the
+# formula, so a version and its digests cannot drift apart.
+#
+# usage: scripts/update-formula v0.7.1
+set -euo pipefail
+
+readonly REPOSITORY_URL="https://github.com/runedeck/cli"
+# Where the digests are read from. A test points this at a file:// copy of
+# a release. The formula always names REPOSITORY_URL.
+readonly DIGEST_SOURCE="${RUNE_DIGEST_SOURCE:-$REPOSITORY_URL}"
+readonly MACOS_ARM_ARCHIVE="rune-cli-macos-aarch64.tar.gz"
+readonly LINUX_INTEL_ARCHIVE="rune-cli-linux-x86_64.tar.gz"
+
+fail() {
+    printf 'fatal: %s\n' "$*" >&2
+    exit 1
+}
+
+fetch() {
+    curl -fsSL --connect-timeout 15 --max-time 300 --retry 3 "$1"
+}
+
+sha256_of_stdin() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | cut -d' ' -f1
+    else
+        fail "sha256sum or shasum is required"
+    fi
+}
+
+is_digest() {
+    [[ "$1" =~ ^[0-9a-f]{64}$ ]]
+}
+
+# The digest that SHA256SUMS records for one archive. sha256sum writes
+# "<digest>  <name>" in text mode and "<digest> *<name>" in binary mode.
+# An archive listed twice gives two lines, which is not one digest.
+recorded_digest() {
+    local sums=$1
+    local archive=$2
+    local digest
+    digest=$(awk -v name="$archive" '$2 == name || $2 == "*" name { print $1 }' <<<"$sums")
+    is_digest "$digest" || fail "SHA256SUMS has no single digest for $archive"
+    printf '%s\n' "$digest"
+}
+
+[ "$#" -eq 1 ] || fail "usage: scripts/update-formula <tag>, such as v0.7.1"
+readonly TAG=$1
+[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "a release tag looks like v0.7.1: $TAG"
+readonly VERSION=${TAG#v}
+
+script_directory=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+readonly FORMULA="$script_directory/../Formula/rune.rb"
+
+sums=$(fetch "$DIGEST_SOURCE/releases/download/$TAG/SHA256SUMS") \
+    || fail "cannot read SHA256SUMS of $TAG: is the release published?"
+macos_arm_digest=$(recorded_digest "$sums" "$MACOS_ARM_ARCHIVE")
+linux_intel_digest=$(recorded_digest "$sums" "$LINUX_INTEL_ARCHIVE")
+source_digest=$(fetch "$DIGEST_SOURCE/archive/refs/tags/$TAG.tar.gz" | sha256_of_stdin) \
+    || fail "cannot read the source archive of $TAG"
+is_digest "$source_digest" || fail "the source archive of $TAG gave no digest"
+
+readonly RELEASE_URL="$REPOSITORY_URL/releases/download/$TAG"
+readonly SOURCE_URL="$REPOSITORY_URL/archive/refs/tags/$TAG.tar.gz"
+
+# The formula is written beside its target and renamed over it, so a
+# failure leaves the published formula as it was.
+readonly STAGED="$FORMULA.staged"
+cat > "$STAGED" <<FORMULA
+class Rune < Formula
+  desc "Deck toolkit for AI harnesses: your runes, deployed"
+  homepage "$REPOSITORY_URL"
+  version "$VERSION"
+  license "EUPL-1.2"
+
+  head do
+    url "$REPOSITORY_URL.git", branch: "main"
+    depends_on "rust" => :build
+  end
+
+  # scripts/update-formula writes this file from a published release.
+  # A release carries a prebuilt rune for Apple Silicon macOS and for
+  # x86-64 Linux. Every other platform builds the tagged source.
+  on_macos do
+    on_arm do
+      url "$RELEASE_URL/$MACOS_ARM_ARCHIVE"
+      sha256 "$macos_arm_digest"
+    end
+    on_intel do
+      url "$SOURCE_URL"
+      sha256 "$source_digest"
+      depends_on "rust" => :build
+    end
+  end
+
+  on_linux do
+    on_intel do
+      url "$RELEASE_URL/$LINUX_INTEL_ARCHIVE"
+      sha256 "$linux_intel_digest"
+    end
+    on_arm do
+      url "$SOURCE_URL"
+      sha256 "$source_digest"
+      depends_on "rust" => :build
+    end
+  end
+
+  def install
+    # The source archive and a HEAD checkout carry a manifest to build.
+    # A release archive holds the binary alone.
+    if File.exist?("Cargo.toml")
+      system "cargo", "install", *std_cargo_args
+    else
+      bin.install "rune"
+    end
+    generate_completions_from_executable(bin/"rune", "completion", "print")
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/rune --version")
+    system bin/"rune", "completion", "print", "zsh"
+  end
+end
+FORMULA
+mv "$STAGED" "$FORMULA"
+
+printf 'Formula/rune.rb now installs rune %s\n' "$VERSION"
